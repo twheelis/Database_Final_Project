@@ -19,7 +19,7 @@ def index():
 
 #rest service to upload json files within a directory.  Make sure to end your address with a /
 @app.route('/upload/<path:path>', methods=['GET'])
-def getCustomerList(path):
+def uploadJSON(path):
     #Mongo is the chosen database, make sure your MongoDB is running before execution of this program
     client = MongoClient()
     #database name is "HotelReviews"
@@ -87,7 +87,7 @@ def getCustomerList(path):
                     reviewslog.append([doc["HotelID"], doc["ReviewID"], e])
     
     
-    #write logs to csv files           
+    #write logs to csv files, logs will write to directory in which this app is located in           
     out = open('ReviewsUploadLog.csv', 'w', newline='')
     for item in reviewslog:
         csv.writer(out).writerow(item)
