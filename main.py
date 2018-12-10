@@ -3,6 +3,7 @@ from flask import Flask, jsonify, request
 from os import listdir
 from pymongo import MongoClient
 from bs4 import BeautifulSoup
+from bson import json_util
 import json
 import csv
 import datetime
@@ -65,6 +66,31 @@ def handlereview():
     return uploadreview(data)
 
 
+#query Hotels or Reviews collections by Key values.  arg variable will take in three arguments separated by +.
+#first argument should either be "Hotel" or "Review"
+#second argument should be one of the keys within the collection
+#third argument is what value one wishes to query
+#example query for all reviews for Hotel with the ID 72572: /query/Review+HotelID+72572
+@app.route('/query/<arg>', methods=['GET'])
+def query(arg):
+    #convert arg string into arg list using "," as the delimiter
+    arg = arg.split("+")
+    # Mongo is the chosen database, make sure your MongoDB is running before execution of this program
+    client = MongoClient()
+    # database name is "HotelReviews"
+    db = client.HotelReviews
+    
+    #determine if 'Hotel' or 'Reviews' collection should be used
+    if arg[0] == 'Hotel':
+        db = client.HotelReviews.Hotel
+        return output(db, arg[1], arg[2])
+    elif arg[0] == 'Reviews':
+        db = client.HotelReviews.Reviews
+        return output(db, arg[1], arg[2])
+    else:
+        return jsonify ({"Error": "Please indicate query field for 'Hotel' or 'Reviews'"})
+
+    
 def uploadreview(data):
 
     # Mongo is the chosen database, make sure your MongoDB is running before execution of this program
@@ -96,8 +122,8 @@ def uploadreview(data):
         # filter - tells mongo to look for a document for 'key' with specified 'value'
         # upsert = update/insert
         # upsert - updates if document is found, else insert
-        thing = collection.update_one({'HotelID': filedata["HotelInfo"]["HotelID"]}, {'$set':filedata["HotelInfo"]}, upsert=True)
-
+        collection.update_one({'HotelID': filedata["HotelInfo"]["HotelID"]}, {'$set': filedata["HotelInfo"]},
+                                      upsert=True)
         # mark upload as "Success"
         hotelslog.append([filedata["HotelInfo"]["HotelID"], "Success"])
     except Exception as e:
@@ -142,30 +168,7 @@ def uploadreview(data):
     # turns everything into json
     return jsonify({"Upload Time": currenttime.strftime("%c"),
                     "Hotels Uploaded": len(hotelslog) - 2,
-                    "Reviews Uploaded": len(reviewslog) - 2})
-
-
-## Rest service of one big query allowing user to write different URLs to filter the big query here
-# This is the code I wrote (TW) for assignment 12. I think using something like this might help with what we're trying to do?
-# I am thinking the key will be to use find to get a big query going and help to filter using an URL.
-# I dunno, just trying to make your life easier. Good luck! I believe in you. Slack me if you need me, TW.
-    @app.route('/api/searchDocuments', methods=['GET'])
-    def searchDocuments():
-        try:
-            tag = request.args["tag"]
-            db = MongoClient().myContentStore
-            fileCursor = db.fs.files.find({})
-            fileList = []
-            for file in fileCursor:
-                if tag in file['tags']:
-                    tempJson = {"fileName": file["fileName"], "_id": str(file["_id"]), "tags": file["tags"]}
-                    fileList.append(tempJson)
-
-            return jsonify({'DocumentList': fileList})
-
-        except Exception as e:
-            print(e)
-            return "Error occurred"
+                    "Reviews Uploaded": len(reviewslog) - 2})  
 
 
 def writereviewslog(reviewslog):
@@ -181,6 +184,41 @@ def writehotelslog(hotelslog):
     for item in hotelslog:
         csv.writer(out).writerow(item)
     out.close()
+
+#returns queried documents, db is the collection to be used, arg1 is the 'key', arg2 is the value searching for
+def output(db, arg1, arg2):
+    fileCursor = db.find()
+    fileList = []
+    
+    #compile all documents that fits query terms
+    for document in fileCursor:
+        tempJSON = json.loads(json_util.dumps(document))
+        #query will result in a hit if arg2 is found anywhere inside the string paired with the arg1 key
+        try:
+            #look at outer most keys
+            if tempJSON[arg1].find(arg2) != -1:
+                fileList.append(tempJSON)
+        except Exception:
+            try:
+                #if arg1 is "Ratings" and arg2 is a key inside "Ratings", i.e. Cleanliness, Location, etc.
+                #arg2 must match key names exactly
+                #filter by one key name at a time
+                if arg2 in list(tempJSON[arg1].keys()):
+                    fileList.append(tempJSON)
+            except Exception:
+                try:
+                    #look inside 'Ratings' keys
+                    if tempJSON["Ratings"][arg1].find(arg2) != -1:
+                        fileList.append(tempJSON)
+                except Exception:
+                    pass
+
+    #return an error if query returns no record or return what is found by query
+    if not fileList:
+        return jsonify({"Error": "There is no record of %s in %s" %(arg2, arg1)})
+        #return (tempJSON["HotelID"])
+    else:
+        return jsonify(fileList)    
 
 
 # Starts the server for serving Rest Ser.vices
